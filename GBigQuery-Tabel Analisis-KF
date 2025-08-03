@@ -1,0 +1,75 @@
+-- Membuat atau mengganti tabel akhir analisis transaksi di BigQuery
+CREATE OR REPLACE TABLE `kimia-farma07`.`kimia_farma`.`kf_analysis` AS
+ -----------------------------------------------------------------------------------------------------------------------------------------
+-- Section: Common Table Expression (CTE)
+-- CTE 'base_transaction' used to clean and transform raw data before final selection
+-- CTE 'base_transaction' digunakan untuk membersihkan dan mentransformasi data mentah sebelum seleksi akhir
+-- This CTE joins transactional, product, and branch data to centralize necessary attributes in a single base.
+-- CTE ini menggabungkan data transaksi, produk, dan cabang untuk menyatukan atribut penting ke dalam satu basis.
+WITH base_transaction AS (
+  SELECT
+    t.transaction_id,
+    t.date,
+    t.branch_id,
+    kc.branch_name,
+    kc.kota,                                 -- Kota (City)
+    kc.provinsi,                             -- Provinsi (Province)
+    kc.rating AS rating_cabang,              -- Rating cabang (Branch rating)
+    t.customer_name,                         -- Nama pelanggan (Customer name)
+    t.product_id,
+    p.product_name,
+    t.price AS actual_price,
+    t.discount_percentage,
+    t.rating AS rating_transaksi,            -- Rating transaksi (Transaction rating)
+
+    -- Gross Profit Margin Calculation
+    -- Menghitung persentase laba kotor berdasarkan rentang harga produk
+    -- Uses a CASE statement to assign profit margin based on defined price tiers.
+    -- Menggunakan pernyataan CASE untuk menetapkan margin keuntungan berdasarkan tingkatan harga.
+    CASE
+      WHEN t.price <= 50000 THEN 0.10
+      WHEN t.price > 50000 AND t.price <= 100000 THEN 0.15
+      WHEN t.price > 100000 AND t.price <= 300000 THEN 0.20
+      WHEN t.price > 300000 AND t.price <= 500000 THEN 0.25
+      WHEN t.price > 500000 THEN 0.30
+      ELSE 0.0
+    END AS gross_profit_percentage,          -- Persentase laba kotor (Gross profit percentage)
+
+    -- Net Sales Calculation
+    -- Menghitung penjualan bersih sebagai harga setelah diskon
+    -- Applies discount percentage directly to obtain the final sale value.
+    -- Mengaplikasikan diskon langsung untuk mendapatkan nilai penjualan akhir.
+    t.price * (1 - t.discount_percentage) AS nett_sales
+
+  FROM `kimia-farma07`.`kimia_farma`.`kf_final_transaction` AS t
+  JOIN `kimia-farma07`.`kimia_farma`.`kf_kantor_cabang` AS kc
+    ON t.branch_id = kc.branch_id
+  JOIN `kimia-farma07`.`kimia_farma`.`kf_product` AS p
+    ON t.product_id = p.product_id
+  WHERE t.price IS NOT NULL AND t.discount_percentage BETWEEN 0 AND 1
+)
+
+-- Final Output Selection
+-- Memilih kolom akhir dan menghitung laba bersih, diurutkan berdasarkan tanggal transaksi
+-- Final output includes all relevant business fields with a new calculated profit metric.
+-- Output akhir mencakup seluruh kolom penting bisnis dengan tambahan metrik laba yang dihitung.
+SELECT
+  transaction_id,
+  date,
+  branch_id,
+  branch_name,
+  kota,                                      -- Kota (City)
+  provinsi,                                  -- Provinsi (Province)
+  rating_cabang,                             -- Rating cabang (Branch rating)
+  customer_name,                             -- Nama pelanggan (Customer name)
+  product_id,
+  product_name,
+  actual_price,
+  discount_percentage,
+  gross_profit_percentage,                   -- Persentase laba kotor (Gross profit percentage)
+  nett_sales,
+  nett_sales * gross_profit_percentage AS nett_profit,
+  rating_transaksi                           -- Rating transaksi (Transaction rating)
+FROM base_transaction
+ORDER BY date;
+
